@@ -58,7 +58,10 @@ function AnalyticsHomePage() {
         greeting={profile === undefined ? null : AN_HOME_TEXT.greeting(profile?.fullName ?? "")}
       >
         {cards.length > 0 ? (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div
+            className="grid gap-3 sm:grid-cols-2"
+            data-stand-deploy-check="ls-analytics-stand-20261118"
+          >
             {cards.map((c) => (
               <Link
                 key={c.key}
