@@ -269,6 +269,28 @@ async function run(input: OnecInputs) {
 }
 
 describe("обработка 1С (process.py и своды)", () => {
+  test.each([false, true])(
+    "старая выгрузка продаж с отбором и разнесёнными столбцами (кэш плана: %s)",
+    async (cached) => {
+      const base = await baseInputs();
+      const expected = await run(base);
+      const source = base.files.find((f) => f.name === "Продажи 2025г.xlsx")!;
+      const positions = [0, 2, 4, 6, 9, 11, 13];
+      const rows = (await rowsOf(await source.load())).map((row) => {
+        const sparse: Cell[] = new Array(14).fill(null);
+        row.forEach((value, i) => {
+          sparse[positions[i]] = value;
+        });
+        return sparse;
+      });
+      const raw = await file("sales", source.name, [["Отбор:", "Студии из списка"], [], ...rows]);
+      if (cached) raw.plan = await cleanPlan(await openXlsx(await raw.load(), inflate));
+      const actual = await run({ ...base, files: base.files.map((f) => (f === source ? raw : f)) });
+      expect(actual.result.status).toBe("done");
+      expect([...actual.facts]).toEqual([...expected.facts]);
+    },
+  );
+
   test("выручка, продажи, занятия, воронка, виды пробных, нулевая — по их правилам", async () => {
     const { result, facts } = await run(await baseInputs());
     expect(result.status).toBe("done");
