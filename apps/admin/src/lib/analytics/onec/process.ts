@@ -190,6 +190,30 @@ async function book(file: OnecFileInput, inflate: Inflate): Promise<XlsxBook> {
   const raw = await openXlsx(await file.load(), inflate, { sheet: "first" });
   const plan = file.plan ?? (await cleanPlan(raw));
   file.onPlan?.(plan);
+  if (file.kind === "sales") {
+    // Старые выгрузки содержат «Отбор:» над шапкой. Его описание заполняет
+    // отдельный столбец, пустой во всём отчёте, и сдвигает позиции после
+    // обычного удаления пустых столбцов. Выбираем поля по самой шапке;
+    // это также исправляет уже сохранённые планы таких файлов.
+    const fields = [
+      "Структурная единица",
+      "Код, Номенклатура",
+      "Клиент.Код",
+      "Документ продажи.Дата",
+      "Количество",
+      "Стоимость",
+      "Оплата",
+    ];
+    for await (const row of raw.rows()) {
+      if (row.r > 30) break;
+      const labels = row.cells.map((v) => strip(orEmpty(v)));
+      const columns = fields.map((label) => labels.indexOf(label));
+      if (columns.some((c) => c < 0)) continue;
+      const emptyRows = new Set(plan.emptyRows);
+      for (let r = 1; r < row.r - 1; r++) emptyRows.add(r);
+      return cleanedView(raw, { columns, emptyRows: [...emptyRows] });
+    }
+  }
   return cleanedView(raw, plan);
 }
 
