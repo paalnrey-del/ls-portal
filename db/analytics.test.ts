@@ -103,6 +103,86 @@ describe.skipIf(!url)("аналитика: фундамент (база)", () =>
     return m as Me;
   }
 
+  test("amoCRM: удаление подключения только администратором, вместе с токеном и кэшем", async () => {
+    await scenario(async (tx) => {
+      const admin = await person(tx, "Админ удаления amoCRM", ["an.admin"]);
+      const staff = await person(tx, "Сотрудник удаления amoCRM", []);
+      await asServer(tx);
+      const [{ id }] = await tx`insert into an_amo_connections (name, base_url)
+        values ('Удаляемая CRM', 'https://delete-test.amocrm.ru') returning id`;
+      const [{ id: other }] = await tx`insert into an_amo_connections (name, base_url)
+        values ('Другая CRM', 'https://keep-test.amocrm.ru') returning id`;
+      for (const connection of [id, other]) {
+        await tx`insert into an_amo_metadata (connection_id) values (${connection})`;
+        await tx`insert into an_secrets (kind, ref, name, ciphertext)
+          values ('amocrm', ${String(connection)}, 'token', 'synthetic-encrypted-value')`;
+        await tx`insert into an_amo_versions (connection_id, amo_lead_id, observed_at, payload)
+          values (${connection}, '1', now(), '{}'::jsonb)`;
+      }
+      await tx`insert into an_secrets (kind, ref, name, ciphertext)
+        values ('fitbase', ${String(id)}, 'token', 'other-service-value')`;
+      await tx`insert into an_amo_sync_state (connection_id, is_running, last_started_at)
+        values (${id}, true, now())`;
+      await as(tx, staff);
+      expect(await failure(tx, () => tx`select an_amo_connection_delete(${id})`)).toContain(
+        "an_forbidden",
+      );
+      await as(tx, admin);
+      expect(await failure(tx, () => tx`select an_amo_connection_delete(${id})`)).toContain(
+        "Дождитесь завершения загрузки",
+      );
+      await asServer(tx);
+      await tx`update an_amo_sync_state set is_running = false where connection_id = ${id}`;
+      await as(tx, admin);
+      await tx`select an_amo_connection_delete(${id})`;
+      expect(await failure(tx, () => tx`select an_amo_connection_delete(${id})`)).toContain(
+        "Подключение уже удалено",
+      );
+      await asServer(tx);
+      expect(
+        (await tx`select count(*)::int as n from an_amo_connections where id = ${id}`)[0].n,
+      ).toBe(0);
+      expect(
+        (await tx`select count(*)::int as n from an_amo_metadata where connection_id = ${id}`)[0].n,
+      ).toBe(0);
+      expect(
+        (await tx`select count(*)::int as n from an_amo_versions where connection_id = ${id}`)[0].n,
+      ).toBe(0);
+      expect(
+        (
+          await tx`select count(*)::int as n from an_secrets where kind = 'amocrm' and ref = ${String(id)}`
+        )[0].n,
+      ).toBe(0);
+      expect(
+        (await tx`select count(*)::int as n from an_amo_connections where id = ${other}`)[0].n,
+      ).toBe(1);
+      expect(
+        (await tx`select count(*)::int as n from an_amo_versions where connection_id = ${other}`)[0]
+          .n,
+      ).toBe(1);
+      expect(
+        (
+          await tx`select count(*)::int as n from an_secrets where kind = 'amocrm' and ref = ${String(other)}`
+        )[0].n,
+      ).toBe(1);
+      expect(
+        (
+          await tx`select count(*)::int as n from an_secrets where kind = 'fitbase' and ref = ${String(id)}`
+        )[0].n,
+      ).toBe(1);
+      expect(
+        (
+          await tx`select count(*)::int as n from an_audit where event = 'amocrm_connection_deleted' and details = ${String(id)}`
+        )[0].n,
+      ).toBe(1);
+      expect(
+        (
+          await tx`select has_function_privilege('anon', 'an_amo_connection_delete(bigint)', 'execute') as allowed`
+        )[0].allowed,
+      ).toBe(false);
+    });
+  });
+
   test("администратор аналитики — все отчёты, диалоги, без ограничений", async () => {
     await scenario(async (tx) => {
       const admin = await person(tx, "Админ Аналитики", ["an.admin"]);
