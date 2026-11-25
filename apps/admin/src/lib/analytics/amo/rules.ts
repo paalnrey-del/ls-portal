@@ -75,9 +75,38 @@ export function amoNormalizeBaseUrl(value: string): string {
 
 /** Их проверка токена: долгоживущий токен интеграции не короче 20 знаков. */
 export function amoTokenCheck(token: string): string {
-  const t = token.trim();
+  const t = token
+    .trim()
+    .replace(/^Bearer[ \t]+/i, "")
+    .trim();
   if (t.length < 20) throw new Error("Токен AmoCRM выглядит неполным.");
+  if (/\s/.test(t)) {
+    throw new Error("В токене AmoCRM есть пробелы или переносы строк. Скопируйте токен целиком.");
+  }
   return t;
+}
+
+/** Диагностика только после отказа API; JWT не используется для подтверждения доступа. */
+export function amoVerificationFailure(status: number, token: string, now = Date.now()): string {
+  if (status !== 401) {
+    return `AmoCRM вернула HTTP ${status}. Проверьте токен и выданные права.`;
+  }
+  const t = amoTokenCheck(token);
+  const parts = t.split(".");
+  if (parts.length === 3) {
+    try {
+      const claims: unknown = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+      const exp = isObject(claims) ? claims.exp : undefined;
+      if (typeof exp === "number" && Number.isFinite(exp) && exp > 0 && exp * 1000 <= now) {
+        return "AmoCRM отклонила токен (HTTP 401): указанный в токене срок действия истёк. Сгенерируйте новый долгосрочный токен в нужном аккаунте amoCRM и переподключите его.";
+      }
+    } catch {
+      // Не выводим содержимое ключа или ошибку JSON с фрагментами токена.
+    }
+  } else {
+    return "AmoCRM отклонила токен (HTTP 401). Сохранённое значение не имеет формата JWT access token. Нужен полный долгосрочный токен из «Ключи и доступы → Сгенерировать токен», а не секретный ключ, ID интеграции или код авторизации.";
+  }
+  return "AmoCRM отклонила токен (HTTP 401). Проверьте, что долгосрочный токен выпущен именно для указанного аккаунта и его доступ не отозван. Переподключите полный токен в настройках подключения.";
 }
 
 /** Их save_connection: название, токен, адрес — в этом порядке. */
