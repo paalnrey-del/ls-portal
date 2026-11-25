@@ -22,7 +22,9 @@ import {
   amoMetadata,
   amoPipelineKey,
   amoSyncDetails,
+  amoTokenCheck,
   amoUtmFieldIds,
+  amoVerificationFailure,
   type AmoField,
   type AmoLeadRow,
   type AmoResponsible,
@@ -44,11 +46,12 @@ export async function amoGet(
   path: string,
 ): Promise<[number, Record<string, unknown>]> {
   const stand = origin();
+  const accessToken = amoTokenCheck(token);
   let res: Response;
   try {
     res = await fetch((stand ?? baseUrl) + path, {
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${accessToken}`,
         Accept: "application/json",
         "User-Agent": AMO_USER_AGENT,
         ...(stand ? { "X-Amo-Base": baseUrl } : {}),
@@ -91,19 +94,19 @@ export async function verifyAmo(id: number): Promise<string> {
   const [status, payload] = await amoGet(c.base_url, c.token, "/api/v4/account");
   const name =
     typeof payload.name === "string" ? payload.name : payload.name ? String(payload.name) : "";
+  const failure = status === 200 ? "" : amoVerificationFailure(status, c.token);
   await must(
     db()
       .from("an_amo_connections")
       .update({
         last_verified_at: new Date().toISOString(),
         last_verification_status: status,
-        last_verification_details:
-          status === 200 ? name.slice(0, 200) : "Токен или доступ AmoCRM не подтверждён.",
+        last_verification_details: status === 200 ? name.slice(0, 200) : failure,
       })
       .eq("id", id),
   );
   if (status !== 200) {
-    throw new Error(`AmoCRM вернула HTTP ${status}. Проверьте токен и выданные права.`);
+    throw new Error(failure);
   }
   return name || "Подключение подтверждено";
 }
