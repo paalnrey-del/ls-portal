@@ -111,6 +111,7 @@ export const amoMarketingQuery = (a: AmoMarketingArgs) => ({
 });
 
 export const amoRpc = {
+  remove: (id: number) => rpc<null>("an_amo_connection_delete", { p_id: id }),
   saveSettings: (id: number, values: Record<string, string>) =>
     rpc<null>("an_amo_settings_save", { p_id: id, p_values: values }),
   saveResponsible: (id: number, user: string, brand: string, city: string, partner: string) =>

@@ -1,10 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Loader2, Settings2, ShieldCheck } from "lucide-react";
+import { Loader2, Settings2, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { AdminShell } from "@/components/admin-shell";
+import { useConfirm } from "@/components/confirm-dialog";
 import { AnalyticsAmoPageSkeleton } from "@/components/page-skeletons";
 import { TableSkeletonRows } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import {
 import { createAmoConnection, verifyAmoConnection } from "@/lib/analytics/amo.functions";
 import {
   amoConnectionsQuery,
+  amoRpc,
   invalidateAmo,
   type AmoConnectionRow,
 } from "@/lib/analytics/amo/data";
@@ -158,7 +160,29 @@ function verificationOf(r: AmoConnectionRow) {
 /** Их «Подключения AmoCRM». */
 function ConnectionsCard({ rows, loading }: { rows: AmoConnectionRow[]; loading: boolean }) {
   const qc = useQueryClient();
+  const { confirm, confirmDialog } = useConfirm();
   const [busy, setBusy] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState<number | null>(null);
+  const remove = async (row: AmoConnectionRow) => {
+    if (
+      !(await confirm({
+        title: `Удалить «${row.name}»?`,
+        description: `${row.base_url}. Подключение, сохранённый токен, настройки и загруженные данные этого подключения будут удалены из портала. Зафиксированные месячные отчёты сохранятся. Данные в самой amoCRM не изменятся.`,
+        confirmLabel: "Удалить подключение",
+      }))
+    )
+      return;
+    setDeleting(row.id);
+    try {
+      await amoRpc.remove(row.id);
+      await invalidateAmo(qc);
+      toast.success("Подключение amoCRM удалено из портала.");
+    } catch (e) {
+      toast.error(`Не удалось удалить подключение: ${(e as Error).message}`);
+    } finally {
+      setDeleting(null);
+    }
+  };
   const verify = async (id: number) => {
     setBusy(id);
     try {
@@ -220,11 +244,22 @@ function ConnectionsCard({ rows, loading }: { rows: AmoConnectionRow[]; loading:
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={busy !== null}
+                      disabled={busy !== null || deleting !== null}
                       onClick={() => void verify(r.id)}
                     >
                       {busy === r.id ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
                       Проверить
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      disabled={busy !== null || deleting !== null}
+                      onClick={() => void remove(r)}
+                      aria-label={`Удалить подключение «${r.name}»`}
+                    >
+                      {deleting === r.id ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                      Удалить
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -233,6 +268,7 @@ function ConnectionsCard({ rows, loading }: { rows: AmoConnectionRow[]; loading:
           )}
         </TableBody>
       </Table>
+      {confirmDialog}
     </section>
   );
 }
