@@ -67,6 +67,9 @@ export async function fbRequest(
 ): Promise<Json> {
   const query = new URLSearchParams();
   for (const [k, v] of Object.entries(params ?? {})) query.append(k, String(v));
+  // API v2 допускает до 100 строк. Без этого FitBase отдаёт по 20:
+  // год записей требует сотен лишних запросов и чаще обрывается на 502.
+  if (FB_PAGED.has(endpoint) && !query.has("page_size")) query.set("page_size", "100");
   query.append("page", String(page));
   let token = s.key.trim();
   if (token.toLowerCase().startsWith("bearer ")) token = token.slice(7).trim();
@@ -105,6 +108,11 @@ export async function fbRequest(
     if (res.status === 401 || res.status === 403) {
       throw new FbError(
         `FitBase · ${endpoint}: нет доступа. Проверьте API-токен и доступные филиалы.`,
+      );
+    }
+    if ([429, 500, 502, 503, 504].includes(res.status)) {
+      throw new FbError(
+        `FitBase · ${endpoint}: HTTP ${res.status}. Сервис временно недоступен; повторите обновление. Предыдущие данные сохранены.`,
       );
     }
     throw new FbError(
