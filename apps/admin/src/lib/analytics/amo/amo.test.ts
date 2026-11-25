@@ -11,7 +11,9 @@ import {
   amoNormalizeBaseUrl,
   amoPipelineKey,
   amoSyncDetails,
+  amoTokenCheck,
   amoUtmFieldIds,
+  amoVerificationFailure,
   pyInt,
   type AmoSyncContext,
 } from "./rules";
@@ -40,6 +42,37 @@ const CTX: AmoSyncContext = {
 };
 
 describe("amoCRM — правила их amocrm.py", () => {
+  test("скопированный Bearer не дублируется; повреждённый ключ не попадает в ошибку", () => {
+    const token = "test-token-with-enough-characters";
+    expect(amoTokenCheck(` Bearer ${token} `)).toBe(token);
+    expect(amoTokenCheck(`bEaReR\t${token}`)).toBe(token);
+    expect(amoTokenCheck(token)).toBe(token);
+    expect(() => amoTokenCheck(`${token}\nsecond-line`)).toThrow("пробелы или переносы");
+  });
+
+  test("401 объясняет срок и тип ключа, не раскрывая содержимое; API остаётся источником проверки", () => {
+    const jwt = (claims: unknown) =>
+      `eyJhbGciOiJSUzI1NiJ9.${btoa(JSON.stringify(claims))}.synthetic-signature`;
+    const now = Date.UTC(2026, 10, 25);
+    const expired = jwt({ exp: now / 1000 - 1, private: "must-not-be-disclosed" });
+    const active = jwt({ exp: now / 1000 + 3600 });
+    expect(amoVerificationFailure(401, expired, now)).toContain("срок действия истёк");
+    expect(amoVerificationFailure(401, active, now)).toContain("доступ не отозван");
+    expect(amoVerificationFailure(401, "synthetic-secret-instead-of-access-token", now)).toContain(
+      "не имеет формата JWT",
+    );
+    expect(amoVerificationFailure(403, expired, now)).toContain("HTTP 403");
+    for (const token of [expired, active, "prefix.invalid-private-json.signature"]) {
+      const message = amoVerificationFailure(401, token, now);
+      expect(message).not.toContain(token);
+      expect(message).not.toContain("must-not-be-disclosed");
+      expect(message).not.toContain("invalid-private-json");
+    }
+    expect(amoVerificationFailure(401, jwt({ exp: "invalid" }), now)).toContain(
+      "доступ не отозван",
+    );
+  });
+
   test("адрес подключения: https, домен amoCRM / Kommo, без пути", () => {
     expect(amoNormalizeBaseUrl(" https://Lady.AmoCRM.ru/ ")).toBe("https://lady.amocrm.ru");
     expect(amoNormalizeBaseUrl("https://x.kommo.com:8443")).toBe("https://x.kommo.com:8443");
